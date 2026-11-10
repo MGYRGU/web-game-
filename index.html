@@ -1,1 +1,269 @@
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shooting Game - Phase 1</title>
+    <style>
+        /* =========================================
+           ベーススタイルとレイアウトの堅牢化
+        ========================================= */
+        * {
+            box-sizing: border-box;
+        }
 
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* スクロールバーによるレイアウト崩れを防止 */
+            background-color: #0f172a; /* 宇宙空間を意識したダークブルー */
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* スマホでのスワイプリロード等を防止 */
+        }
+
+        /* 1. ゲームレイヤー (描画専用) */
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            display: block;
+            /* width/heightはJSで動的に制御します */
+        }
+
+        /* 2. UIレイヤー (UI・スコア・デバッグ表示専用) */
+        #uiLayer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none; /* クリックイベントを背面のCanvasに透過させる */
+        }
+
+        /* =========================================
+           デバッグUIのスタイル
+        ========================================= */
+        #debugUI {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(15, 23, 42, 0.9);
+            border: 1px solid #ef4444; /* 赤枠で目立たせる */
+            border-radius: 8px;
+            padding: 12px;
+            width: 90%;
+            max-width: 400px;
+            max-height: 40vh;
+            overflow-y: auto;
+            pointer-events: auto; /* ここだけはスクロール可能にする */
+            display: none; /* エラーが起きるまでは非表示 */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        .debug-header {
+            color: #f87171;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .debug-error-item {
+            color: #fecaca;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            margin-bottom: 8px;
+            word-break: break-all;
+            background: rgba(239, 68, 68, 0.2);
+            padding: 6px;
+            border-radius: 4px;
+        }
+
+        /* =========================================
+           テスト用コントロール (Phase 1動作確認用)
+        ========================================= */
+        #testControls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3;
+            pointer-events: auto;
+            display: flex;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 12px;
+            backdrop-filter: blur(4px);
+        }
+
+        button {
+            padding: 10px 16px;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover { background-color: #2563eb; transform: translateY(-1px); }
+        button:active { transform: translateY(1px); }
+        #btnTestError { background-color: #ef4444; }
+        #btnTestError:hover { background-color: #dc2626; }
+
+    </style>
+</head>
+<body>
+
+    <!-- =========================================
+         HTML構造
+    ========================================= -->
+    
+    <!-- 描画用キャンバス (ここにDOM要素は追加しない) -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI用レイヤー -->
+    <div id="uiLayer">
+        <!-- デバッグ画面コンテナ -->
+        <div id="debugUI">
+            <div class="debug-header">
+                <span>⚠️ Runtime Error Detected</span>
+            </div>
+            <div id="debugContent"></div>
+        </div>
+    </div>
+
+    <!-- 動作確認用ボタン (次フェーズ以降は削除・非表示にします) -->
+    <div id="testControls">
+        <button id="btnTestError">意図的なエラー発生</button>
+        <button id="btnClearLog">ログをクリア</button>
+    </div>
+
+    <!-- =========================================
+         JavaScript ロジック
+    ========================================= -->
+    <script>
+        /**
+         * 1. デバッグ＆エラーハンドリング システム
+         * この仕組みがあることで、今後の開発中に画面が真っ白になっても
+         * 理由が左上に表示され、原因特定が容易になります。
+         */
+        const debugUI = document.getElementById('debugUI');
+        const debugContent = document.getElementById('debugContent');
+
+        function displayError(message, source, lineno, colno) {
+            // エラーUIを表示
+            debugUI.style.display = 'block';
+            
+            // エラー要素の作成
+            const el = document.createElement('div');
+            el.className = 'debug-error-item';
+            
+            // 具体的なエラーメッセージの組み立て
+            let text = `<strong>Error:</strong> ${message}`;
+            if (source) {
+                // ファイル名のみを抽出してシンプルに表示
+                const filename = source.split('/').pop() || 'inline script';
+                text += `<br><span style="color: #94a3b8; font-size: 10px;">Location: ${filename} at line ${lineno}:${colno}</span>`;
+            }
+            
+            el.innerHTML = text;
+            debugContent.appendChild(el);
+            
+            // 最新のエラーが見えるように一番下へスクロール
+            debugUI.scrollTop = debugUI.scrollHeight;
+        }
+
+        // 同期エラー（通常の実行時エラー）をキャッチ
+        window.onerror = function(message, source, lineno, colno, error) {
+            displayError(message, source, lineno, colno);
+            // trueを返すとブラウザ標準のコンソール出力を抑制しますが、
+            // 開発者ツールでも見たいのでfalseを返します。
+            return false; 
+        };
+
+        // 非同期エラー（Promise内で起きたエラー）をキャッチ
+        window.addEventListener('unhandledrejection', function(event) {
+            displayError(`Unhandled Promise: ${event.reason}`, 'Promise', 0, 0);
+        });
+
+
+        /**
+         * 2. キャンバス（ゲームレイヤー）のセットアップ
+         * デバイスの解像度やウィンドウサイズ変更に自動追従する設計
+         */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            // ウィンドウの内部サイズに合わせてキャンバスをリサイズ
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // リサイズされるたびに描画内容が消えるため、再描画を呼ぶ
+            renderPlaceholder();
+        }
+
+        // 初回実行時と、画面リサイズ時に実行
+        window.addEventListener('resize', resizeCanvas);
+
+        // Phase 1 用のプレースホルダー描画
+        function renderPlaceholder() {
+            // 背景のクリア
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // グリッド線（デバッグや位置把握用）を描画
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for(let x = 0; x < canvas.width; x += 50) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for(let y = 0; x = 0, y < canvas.height; y += 50) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+
+            // テキストの描画
+            ctx.fillStyle = '#64748b';
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Game Canvas Ready.', canvas.width / 2, canvas.height / 2);
+            ctx.font = '14px sans-serif';
+            ctx.fillText('z-index: 1 / The UI layer is on top of this.', canvas.width / 2, canvas.height / 2 + 30);
+        }
+
+        // 初期化
+        resizeCanvas();
+
+
+        /**
+         * 3. テスト用コントロールの処理
+         */
+        document.getElementById('btnTestError').addEventListener('click', () => {
+            // 意図的に存在しない関数を呼び出してエラーを発生させる
+            someUndefinedFunctionThatCausesAnError();
+        });
+
+        document.getElementById('btnClearLog').addEventListener('click', () => {
+            // ログの初期化と非表示
+            debugContent.innerHTML = '';
+            debugUI.style.display = 'none';
+        });
+
+    </script>
+</body>
+</html>
+```
