@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>2D Space Shooter - Step 2 Player Controls</title>
+  <title>2D Space Shooter - Step 3 Weapons & Bullet System</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     /* CSS Variables & Base Setup */
@@ -240,14 +240,15 @@
     </div>
     <div id="debug-content">
       <div class="debug-item info">
-        <div class="msg">Step 2 初期化完了</div>
-        <div class="meta">自機操作 (WASD / 矢印 / タッチドラッグ) が有効です。</div>
+        <div class="msg">Step 3 初期化完了</div>
+        <div class="meta">ツインレーザー兵装連動 (SPACE / Z / タッチ連射) が有効です。</div>
       </div>
     </div>
     <div id="debug-footer" class="p-1 px-2.5 bg-white/5 border-t border-white/5 flex justify-between text-[9px] text-slate-400">
       <div class="flex gap-2">
         <span id="dbg-fps-text">FPS: 60</span>
         <span id="dbg-coords">POS: 240, 520</span>
+        <span id="dbg-bullets">BULLETS: 0</span>
       </div>
       <span id="dbg-pos-label">位置: top-left (F2で切替)</span>
     </div>
@@ -493,10 +494,63 @@
     let fps = 60;
     const fpsElem = document.getElementById('dbg-fps-text');
     const coordsElem = document.getElementById('dbg-coords');
+    const bulletsElem = document.getElementById('dbg-bullets');
 
     /**
      * =========================================================================
-     *  4. INPUT MANAGER (キーボード & タッチ / マウスドラッグ)
+     *  4. BULLET ENTITY & MANAGEMENT (弾丸クラス & 管理)
+     * =========================================================================
+     */
+    class Bullet {
+      constructor(x, y, vx = 0, vy = -750) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.width = 4;
+        this.height = 18;
+        this.radius = 3; // 当たり判定用半径
+        this.isAlive = true;
+      }
+
+      update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // 画面上端を超えたら消滅フラグを立てる (メモリリーク防止)
+        if (this.y < -30) {
+          this.isAlive = false;
+        }
+      }
+
+      draw(ctx) {
+        ctx.save();
+        // 高輝度ネオンプラズマ弾の描画
+        ctx.shadowColor = '#00f0ff';
+        ctx.shadowBlur = 10;
+
+        // 外側グロー弾芯
+        ctx.fillStyle = '#00e5ff';
+        ctx.beginPath();
+        ctx.roundRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height, 3);
+        ctx.fill();
+
+        // 内側コアホワイト
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(this.x - 1, this.y - this.height / 2 + 2, 2, this.height - 4, 1);
+        ctx.fill();
+
+        ctx.restore();
+      }
+    }
+
+    // 発射中の弾丸プール
+    const bullets = [];
+
+    /**
+     * =========================================================================
+     *  5. INPUT MANAGER (キーボード & タッチ / マウスドラッグ)
      * =========================================================================
      */
     const Input = {
@@ -582,7 +636,7 @@
 
     /**
      * =========================================================================
-     *  5. PLAYER ENTITY (自機クラス)
+     *  6. PLAYER ENTITY (自機クラス - 兵装システム統合)
      * =========================================================================
      */
     class Player {
@@ -596,10 +650,37 @@
         this.vy = 0;
         this.tilt = 0;             // 左右バンキング角度 (rad)
         this.particles = [];       // スラスター噴射パーティクル
+        this.muzzleFlashes = [];   // マズルフラッシュ火花
+
+        // 兵装パラメータ
+        this.fireCooldown = 0;
+        this.fireRate = 0.11;      // 連射レート (約9発/秒)
+        this.wingSpan = 12;        // ツインキャノン砲門の間隔
       }
 
       clamp(val, min, max) {
         return Math.max(min, Math.min(max, val));
+      }
+
+      shoot() {
+        // 左右の主翼からツインショット発射
+        bullets.push(new Bullet(this.x - this.wingSpan, this.y - 12));
+        bullets.push(new Bullet(this.x + this.wingSpan, this.y - 12));
+
+        // マズルフラッシュの火花生成
+        for (let side of [-this.wingSpan, this.wingSpan]) {
+          for (let i = 0; i < 3; i++) {
+            this.muzzleFlashes.push({
+              x: this.x + side + (Math.random() - 0.5) * 4,
+              y: this.y - 14,
+              vx: (Math.random() - 0.5) * 60,
+              vy: -60 - Math.random() * 80,
+              size: 2 + Math.random() * 2,
+              life: 1.0,
+              decay: 10 + Math.random() * 6
+            });
+          }
+        }
       }
 
       update(dt) {
@@ -614,7 +695,6 @@
 
         // タッチ非操作時のみキーボード移動を適用
         if (!Input.touch.active) {
-          // 斜め移動時の速度正規化 (斜めだけ速くなるのを防止)
           if (mx !== 0 && my !== 0) {
             mx *= Math.SQRT1_2;
             my *= Math.SQRT1_2;
@@ -626,13 +706,20 @@
           this.x += this.vx * dt;
           this.y += this.vy * dt;
 
-          // 画面端クランプ処理 (自機が画面外へ出ないよう制限)
           this.x = this.clamp(this.x, this.radius, VIRTUAL_WIDTH - this.radius);
           this.y = this.clamp(this.y, this.radius, VIRTUAL_HEIGHT - this.radius);
         }
 
+        // ショット入力受付 (Space, Zキー、またはタッチドラッグ中はオートファイア)
+        this.fireCooldown -= dt;
+        const wantsToShoot = Input.isDown('Space', 'KeyZ') || Input.touch.active;
+        if (wantsToShoot && this.fireCooldown <= 0) {
+          this.shoot();
+          this.fireCooldown = this.fireRate;
+        }
+
         // 移動時のスムーズな機体バンキング計算
-        const targetTilt = (this.vx / this.speed) * 0.35; // 最大傾斜角 約20度
+        const targetTilt = (this.vx / this.speed) * 0.35;
         this.tilt += (targetTilt - this.tilt) * 14 * dt;
 
         // スラスター噴射パーティクル生成
@@ -649,7 +736,7 @@
           });
         }
 
-        // パーティクル寿命更新
+        // スラスターパーティクル寿命更新
         for (let i = this.particles.length - 1; i >= 0; i--) {
           const p = this.particles[i];
           p.x += p.vx * dt;
@@ -657,6 +744,17 @@
           p.life -= p.decay * dt;
           if (p.life <= 0) {
             this.particles.splice(i, 1);
+          }
+        }
+
+        // マズルフラッシュ寿命更新
+        for (let i = this.muzzleFlashes.length - 1; i >= 0; i--) {
+          const m = this.muzzleFlashes[i];
+          m.x += m.vx * dt;
+          m.y += m.vy * dt;
+          m.life -= m.decay * dt;
+          if (m.life <= 0) {
+            this.muzzleFlashes.splice(i, 1);
           }
         }
       }
@@ -670,7 +768,15 @@
           ctx.fill();
         }
 
-        // 2. 自機本体（左右傾き適用）
+        // 2. マズルフラッシュ粒子の描画
+        for (const m of this.muzzleFlashes) {
+          ctx.fillStyle = `rgba(180, 255, 255, ${m.life * 0.9})`;
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, m.size * m.life, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 3. 自機本体（左右傾き適用）
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.tilt);
@@ -700,10 +806,10 @@
         ctx.closePath();
         ctx.fill();
 
-        // 翼端アクセント
+        // 砲門ノズル (マズル部)
         ctx.fillStyle = '#38bdf8';
-        ctx.fillRect(-15, 6, 2.5, 5);
-        ctx.fillRect(12.5, 6, 2.5, 5);
+        ctx.fillRect(-this.wingSpan - 1.5, -4, 3, 10);
+        ctx.fillRect(this.wingSpan - 1.5, -4, 3, 10);
 
         // 当たり判定コア (高輝度ホワイト)
         ctx.shadowColor = '#ffffff';
@@ -738,6 +844,15 @@
 
       // 自機の更新
       player.update(dt);
+
+      // 弾丸の更新と画面外エンティティの破棄
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.update(dt);
+        if (!b.isAlive) {
+          bullets.splice(i, 1);
+        }
+      }
     }
 
     /**
@@ -767,35 +882,42 @@
         ctx.stroke();
       }
 
-      // 4. 自機描画
+      // 4. 弾丸描画
+      for (const b of bullets) {
+        b.draw(ctx);
+      }
+
+      // 5. 自機描画
       player.draw(ctx);
 
-      // 5. ステータス & 操作ガイドHUD (Canvas内)
+      // 6. ステータス & 操作ガイドHUD
       ctx.fillStyle = 'rgba(0, 255, 204, 0.85)';
       ctx.font = 'bold 15px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('STEP 2: PLAYER CONTROLS ACTIVE', VIRTUAL_WIDTH / 2, 45);
+      ctx.fillText('STEP 3: WEAPONS SYSTEM ONLINE', VIRTUAL_WIDTH / 2, 45);
 
       ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
       ctx.font = '11px monospace';
-      ctx.fillText('MOVE: [W,A,S,D] or [↑,←,↓,→] or TOUCH DRAG', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 35);
-      ctx.fillText('Awaiting Step 3: Weapon Systems & Object Pool', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 18);
+      ctx.fillText('MOVE: [W,A,S,D] / [ARROWS]  |  FIRE: [SPACE] or [Z]', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 35);
+      ctx.fillText('MOBILE: TOUCH DRAG TO MOVE & AUTO-FIRE', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 18);
     }
 
     /**
      * メインループ (requestAnimationFrame)
      */
     function loop(currentTime) {
-      const dt = Math.min((currentTime - lastTime) / 1000, 0.1); // 最大dtクランプでタブ復帰時の暴走防止
+      const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
       lastTime = currentTime;
 
-      // FPSおよび座標更新
       frameCount++;
-      if (frameCount % 10 === 0) {
+      if (frameCount % 6 === 0) {
         fps = Math.round(1 / dt);
         if (fpsElem) fpsElem.textContent = `FPS: ${fps}`;
         if (coordsElem) {
           coordsElem.textContent = `POS: ${Math.round(player.x)}, ${Math.round(player.y)}`;
+        }
+        if (bulletsElem) {
+          bulletsElem.textContent = `BULLETS: ${bullets.length}`;
         }
       }
 
@@ -811,7 +933,7 @@
         lastTime = time;
         loop(time);
       });
-      DebugMonitor.reportInfo('Playerシステム初期化', '入力受付 & 画面端クランプ処理稼働');
+      DebugMonitor.reportInfo('兵装システム初期化', 'ツインプラズマキャノン & 弾丸メモリ管理稼働');
     });
   </script>
 </body>
