@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>2D Space Shooter - Step 1 Foundation</title>
+  <title>2D Space Shooter - Step 2 Player Controls</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     /* CSS Variables & Base Setup */
@@ -240,12 +240,15 @@
     </div>
     <div id="debug-content">
       <div class="debug-item info">
-        <div class="msg">Step 1 初期化完了</div>
-        <div class="meta">エラーリスナー & Canvasループが稼働中です。</div>
+        <div class="msg">Step 2 初期化完了</div>
+        <div class="meta">自機操作 (WASD / 矢印 / タッチドラッグ) が有効です。</div>
       </div>
     </div>
     <div id="debug-footer" class="p-1 px-2.5 bg-white/5 border-t border-white/5 flex justify-between text-[9px] text-slate-400">
-      <span id="dbg-fps-text">FPS: 60</span>
+      <div class="flex gap-2">
+        <span id="dbg-fps-text">FPS: 60</span>
+        <span id="dbg-coords">POS: 240, 520</span>
+      </div>
       <span id="dbg-pos-label">位置: top-left (F2で切替)</span>
     </div>
   </div>
@@ -489,14 +492,236 @@
     let frameCount = 0;
     let fps = 60;
     const fpsElem = document.getElementById('dbg-fps-text');
+    const coordsElem = document.getElementById('dbg-coords');
 
-    // Step 1 プレビュー自機（待機状態アニメーション用）
-    const placeholderPlayer = {
-      x: VIRTUAL_WIDTH / 2,
-      y: VIRTUAL_HEIGHT - 120,
-      radius: 14,
-      hoverOffset: 0
+    /**
+     * =========================================================================
+     *  4. INPUT MANAGER (キーボード & タッチ / マウスドラッグ)
+     * =========================================================================
+     */
+    const Input = {
+      keys: {},
+      touch: {
+        active: false,
+        touchId: null,
+        offsetX: 0,
+        offsetY: 0,
+        lastX: 0
+      },
+
+      init(targetCanvas) {
+        // キーボード入力追跡
+        window.addEventListener('keydown', (e) => {
+          this.keys[e.code] = true;
+          // 矢印・Spaceキーによるブラウザスクロールを防止
+          if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+            e.preventDefault();
+          }
+        });
+
+        window.addEventListener('keyup', (e) => {
+          this.keys[e.code] = false;
+        });
+
+        // タッチ操作 (相対ドラッグ方式: 指で機体が隠れないよう操作可能)
+        const getCanvasCoord = (clientX, clientY) => {
+          const rect = targetCanvas.getBoundingClientRect();
+          const scaleX = VIRTUAL_WIDTH / rect.width;
+          const scaleY = VIRTUAL_HEIGHT / rect.height;
+          return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+          };
+        };
+
+        targetCanvas.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          const t = e.touches[0];
+          const pos = getCanvasCoord(t.clientX, t.clientY);
+          this.touch.active = true;
+          this.touch.touchId = t.identifier;
+          // タッチ開始位置と自機座標のオフセットを記憶
+          this.touch.offsetX = player.x - pos.x;
+          this.touch.offsetY = player.y - pos.y;
+          this.touch.lastX = pos.x;
+        }, { passive: false });
+
+        targetCanvas.addEventListener('touchmove', (e) => {
+          if (!this.touch.active) return;
+          e.preventDefault();
+          for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            if (t.identifier === this.touch.touchId) {
+              const pos = getCanvasCoord(t.clientX, t.clientY);
+              // タッチ移動量から即座に移動速度を算出しバンキングに反映
+              player.vx = (pos.x - this.touch.lastX) * 20;
+              this.touch.lastX = pos.x;
+
+              // 目標座標へ更新（クランプ付き）
+              player.x = player.clamp(pos.x + this.touch.offsetX, player.radius, VIRTUAL_WIDTH - player.radius);
+              player.y = player.clamp(pos.y + this.touch.offsetY, player.radius, VIRTUAL_HEIGHT - player.radius);
+              break;
+            }
+          }
+        }, { passive: false });
+
+        const endTouch = () => {
+          this.touch.active = false;
+          this.touch.touchId = null;
+          player.vx = 0;
+          player.vy = 0;
+        };
+        targetCanvas.addEventListener('touchend', endTouch);
+        targetCanvas.addEventListener('touchcancel', endTouch);
+      },
+
+      isDown(keyA, keyB) {
+        return !!(this.keys[keyA] || this.keys[keyB]);
+      }
     };
+
+    /**
+     * =========================================================================
+     *  5. PLAYER ENTITY (自機クラス)
+     * =========================================================================
+     */
+    class Player {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 16;         // 機体グラフィック半径
+        this.hitRadius = 4;        // 当たり判定コア半径 (弾幕STG基準)
+        this.speed = 320;          // 移動速度 (px/sec)
+        this.vx = 0;
+        this.vy = 0;
+        this.tilt = 0;             // 左右バンキング角度 (rad)
+        this.particles = [];       // スラスター噴射パーティクル
+      }
+
+      clamp(val, min, max) {
+        return Math.max(min, Math.min(max, val));
+      }
+
+      update(dt) {
+        // キーボード入力方向の算出
+        let mx = 0;
+        let my = 0;
+
+        if (Input.isDown('ArrowLeft', 'KeyA')) mx -= 1;
+        if (Input.isDown('ArrowRight', 'KeyD')) mx += 1;
+        if (Input.isDown('ArrowUp', 'KeyW')) my -= 1;
+        if (Input.isDown('ArrowDown', 'KeyS')) my += 1;
+
+        // タッチ非操作時のみキーボード移動を適用
+        if (!Input.touch.active) {
+          // 斜め移動時の速度正規化 (斜めだけ速くなるのを防止)
+          if (mx !== 0 && my !== 0) {
+            mx *= Math.SQRT1_2;
+            my *= Math.SQRT1_2;
+          }
+
+          this.vx = mx * this.speed;
+          this.vy = my * this.speed;
+
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+
+          // 画面端クランプ処理 (自機が画面外へ出ないよう制限)
+          this.x = this.clamp(this.x, this.radius, VIRTUAL_WIDTH - this.radius);
+          this.y = this.clamp(this.y, this.radius, VIRTUAL_HEIGHT - this.radius);
+        }
+
+        // 移動時のスムーズな機体バンキング計算
+        const targetTilt = (this.vx / this.speed) * 0.35; // 最大傾斜角 約20度
+        this.tilt += (targetTilt - this.tilt) * 14 * dt;
+
+        // スラスター噴射パーティクル生成
+        if (Math.random() < 0.85) {
+          const spread = (Math.random() - 0.5) * 8;
+          this.particles.push({
+            x: this.x + spread,
+            y: this.y + 12,
+            vx: spread * 0.2,
+            vy: 100 + Math.random() * 120,
+            size: 2.5 + Math.random() * 2,
+            life: 1.0,
+            decay: 4.0 + Math.random() * 2.5
+          });
+        }
+
+        // パーティクル寿命更新
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const p = this.particles[i];
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.life -= p.decay * dt;
+          if (p.life <= 0) {
+            this.particles.splice(i, 1);
+          }
+        }
+      }
+
+      draw(ctx) {
+        // 1. スラスター噴射粒子の描画
+        for (const p of this.particles) {
+          ctx.fillStyle = `rgba(255, ${Math.floor(100 + p.life * 130)}, 40, ${p.life * 0.85})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 2. 自機本体（左右傾き適用）
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.tilt);
+
+        // サイバーネオングロー
+        ctx.shadowColor = '#00ffcc';
+        ctx.shadowBlur = 12;
+
+        // メインウィング (前進翼形状)
+        ctx.fillStyle = '#00ffcc';
+        ctx.beginPath();
+        ctx.moveTo(0, -20);
+        ctx.lineTo(16, 12);
+        ctx.lineTo(7, 8);
+        ctx.lineTo(0, 14);
+        ctx.lineTo(-7, 8);
+        ctx.lineTo(-16, 12);
+        ctx.closePath();
+        ctx.fill();
+
+        // コックピットフレーム
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.moveTo(0, -12);
+        ctx.lineTo(4, 3);
+        ctx.lineTo(-4, 3);
+        ctx.closePath();
+        ctx.fill();
+
+        // 翼端アクセント
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(-15, 6, 2.5, 5);
+        ctx.fillRect(12.5, 6, 2.5, 5);
+
+        // 当たり判定コア (高輝度ホワイト)
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.hitRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+    }
+
+    // 自機インスタンス化
+    const player = new Player(VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 120);
+
+    // 入力マネージャーの初期化
+    Input.init(canvas);
 
     /**
      * 更新処理
@@ -511,8 +736,8 @@
         }
       }
 
-      // プレビュー自機の待機浮遊モーション
-      placeholderPlayer.hoverOffset = Math.sin(performance.now() * 0.004) * 5;
+      // 自機の更新
+      player.update(dt);
     }
 
     /**
@@ -531,7 +756,7 @@
         ctx.fill();
       }
 
-      // 3. グリッドガイドライン (背景のレトロサイバー感)
+      // 3. 背景サイバーグリッドライン
       ctx.strokeStyle = 'rgba(0, 255, 204, 0.03)';
       ctx.lineWidth = 1;
       const gridSize = 40;
@@ -542,69 +767,36 @@
         ctx.stroke();
       }
 
-      // 4. Step 1 ステータスHUD (Canvas内)
-      ctx.fillStyle = 'rgba(0, 255, 204, 0.9)';
-      ctx.font = 'bold 16px monospace';
+      // 4. 自機描画
+      player.draw(ctx);
+
+      // 5. ステータス & 操作ガイドHUD (Canvas内)
+      ctx.fillStyle = 'rgba(0, 255, 204, 0.85)';
+      ctx.font = 'bold 15px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('STEP 1: SYSTEM INITIALIZED', VIRTUAL_WIDTH / 2, 70);
+      ctx.fillText('STEP 2: PLAYER CONTROLS ACTIVE', VIRTUAL_WIDTH / 2, 45);
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.font = '12px monospace';
-      ctx.fillText('Canvas Resolution: 480 × 640 (Auto Scaled)', VIRTUAL_WIDTH / 2, 95);
-      ctx.fillText('GitHub Pages Ready', VIRTUAL_WIDTH / 2, 115);
-
-      // 5. 自機シンボル (幾何学ベクター描画)
-      const px = placeholderPlayer.x;
-      const py = placeholderPlayer.y + placeholderPlayer.hoverOffset;
-
-      ctx.save();
-      ctx.shadowColor = '#00ffcc';
-      ctx.shadowBlur = 12;
-
-      // 機体ボディ
-      ctx.fillStyle = '#00ffcc';
-      ctx.beginPath();
-      ctx.moveTo(px, py - 18);
-      ctx.lineTo(px + 14, py + 14);
-      ctx.lineTo(px, py + 8);
-      ctx.lineTo(px - 14, py + 14);
-      ctx.closePath();
-      ctx.fill();
-
-      // コックピットコア
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // スラスター炎
-      ctx.fillStyle = 'rgba(255, 100, 50, 0.8)';
-      ctx.beginPath();
-      ctx.moveTo(px - 5, py + 10);
-      ctx.lineTo(px + 5, py + 10);
-      ctx.lineTo(px, py + 18 + Math.random() * 6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      // 待機ガイドテキスト
-      ctx.fillStyle = '#94a3b8';
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
       ctx.font = '11px monospace';
-      ctx.fillText('Awaiting Step 2: Player Input & Entity Movement', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 60);
+      ctx.fillText('MOVE: [W,A,S,D] or [↑,←,↓,→] or TOUCH DRAG', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 35);
+      ctx.fillText('Awaiting Step 3: Weapon Systems & Object Pool', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 18);
     }
 
     /**
      * メインループ (requestAnimationFrame)
      */
     function loop(currentTime) {
-      const dt = (currentTime - lastTime) / 1000;
+      const dt = Math.min((currentTime - lastTime) / 1000, 0.1); // 最大dtクランプでタブ復帰時の暴走防止
       lastTime = currentTime;
 
-      // FPSカウント
+      // FPSおよび座標更新
       frameCount++;
-      if (frameCount % 30 === 0) {
+      if (frameCount % 10 === 0) {
         fps = Math.round(1 / dt);
         if (fpsElem) fpsElem.textContent = `FPS: ${fps}`;
+        if (coordsElem) {
+          coordsElem.textContent = `POS: ${Math.round(player.x)}, ${Math.round(player.y)}`;
+        }
       }
 
       update(dt);
@@ -619,7 +811,7 @@
         lastTime = time;
         loop(time);
       });
-      DebugMonitor.reportInfo('Canvasループ開始', '480x640 内部解像度でレンダリング中');
+      DebugMonitor.reportInfo('Playerシステム初期化', '入力受付 & 画面端クランプ処理稼働');
     });
   </script>
 </body>
