@@ -46,6 +46,74 @@
         }
 
         /* =========================================
+           Phase 4: UI画面(タイトル、ゲームオーバー、スコア)のスタイル
+        ========================================= */
+        #scoreDisplay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            display: none; /* プレイ中のみ表示 */
+        }
+
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto; /* ボタンクリックを許可 */
+            transition: opacity 0.3s ease;
+        }
+
+        .screen-overlay h1 {
+            font-size: 48px;
+            color: #38bdf8;
+            margin-bottom: 10px;
+            text-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        .screen-overlay p {
+            font-size: 18px;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+            background: #2563eb;
+            border: 2px solid #60a5fa;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #1d4ed8;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* =========================================
            デバッグUIのスタイル
         ========================================= */
         #debugUI {
@@ -96,6 +164,23 @@
 
     <!-- UI用レイヤー -->
     <div id="uiLayer">
+        <!-- Phase 4: スコアと各画面UIの追加 -->
+        <div id="scoreDisplay">Score: 0</div>
+
+        <!-- タイトル画面 -->
+        <div id="titleScreen" class="screen-overlay">
+            <h1>Neon Shooter</h1>
+            <p>Drag or Arrow Keys to Move (Auto-fire)</p>
+            <button id="startBtn" class="btn">START GAME</button>
+        </div>
+
+        <!-- ゲームオーバー画面 -->
+        <div id="gameOverScreen" class="screen-overlay hidden">
+            <h1 style="color: #ef4444; text-shadow: 0 0 15px rgba(239, 68, 68, 0.6);">GAME OVER</h1>
+            <p id="finalScoreText">Score: 0</p>
+            <button id="restartBtn" class="btn">RESTART</button>
+        </div>
+
         <!-- デバッグ画面コンテナ -->
         <div id="debugUI">
             <div class="debug-header">
@@ -149,6 +234,98 @@
 
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
+
+        /**
+         * 2.5 レトロサウンドシステム (Web Audio API)
+         * 外部ファイルを使わず、オシレーターで波形を生成して音を鳴らします。
+         */
+        let audioCtx;
+        let bgmInterval;
+        
+        function initAudio() {
+            if (!audioCtx) {
+                // ブラウザの互換性を考慮したAudioContextの生成
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            // ユーザーの操作後に再開する
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        const Sound = {
+            playShoot: () => {
+                if (!audioCtx || audioCtx.state !== 'running') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(110, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.02, audioCtx.currentTime); // 音量控えめ
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            },
+            playDamage: () => {
+                if (!audioCtx || audioCtx.state !== 'running') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            },
+            playExplosion: () => {
+                if (!audioCtx || audioCtx.state !== 'running') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            },
+            playGameOver: () => {
+                if (!audioCtx || audioCtx.state !== 'running') return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 1.0);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 1.0);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 1.0);
+            },
+            startBGM: () => {
+                Sound.stopBGM();
+                // 8bit風のシンプルなベースラインの周波数配列
+                const notes = [220, 0, 261.63, 293.66, 329.63, 0, 392.00, 329.63];
+                let noteIndex = 0;
+                bgmInterval = setInterval(() => {
+                    if (!audioCtx || audioCtx.state !== 'running') return;
+                    if (notes[noteIndex] > 0) {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.value = notes[noteIndex];
+                        gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+                        osc.connect(gain); gain.connect(audioCtx.destination);
+                        osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+                    }
+                    noteIndex = (noteIndex + 1) % notes.length;
+                }, 150); // 150msごとに音を鳴らすループ
+            },
+            stopBGM: () => {
+                if (bgmInterval) clearInterval(bgmInterval);
+            }
+        };
 
         /**
          * 3. 入力管理クラス
@@ -277,8 +454,11 @@
             constructor(x, y) {
                 super(x, y, 35, 35);
                 // 敵によって落ちる速度をランダムにする
-                this.speed = 2 + Math.random() * 3;
-                this.color = '#ef4444'; // 赤
+                this.speed = 1.5 + Math.random() * 2; // 耐久があるため少し遅く調整
+                
+                // 耐久力(HP)を追加
+                this.maxHp = 3;
+                this.hp = this.maxHp;
             }
 
             update(canvasHeight) {
@@ -292,7 +472,10 @@
             draw(ctx) {
                 ctx.save();
                 ctx.translate(this.x, this.y);
-                ctx.fillStyle = this.color;
+                
+                // HPに応じて色を変化させる（ダメージを受けると暗い赤になる）
+                const lightness = 30 + (this.hp / this.maxHp) * 30; // 30% ~ 60%
+                ctx.fillStyle = `hsl(0, 80%, ${lightness}%)`;
 
                 // ひし形のUFO風の敵
                 ctx.beginPath();
@@ -347,6 +530,7 @@
                 if (this.shootTimer >= this.shootInterval) {
                     // 機首（機体の上部）から弾を生成
                     bullets.push(new Bullet(this.x, this.y - halfH));
+                    Sound.playShoot(); // 弾の発射音を鳴らす
                     this.shootTimer = 0; // タイマーリセット
                 }
             }
@@ -355,20 +539,28 @@
                 ctx.save();
                 ctx.translate(this.x, this.y);
                 
+                // 機体の描画
                 ctx.fillStyle = this.color;
                 ctx.beginPath();
-                ctx.moveTo(0, -this.height / 2);
-                ctx.lineTo(this.width / 2, this.height / 2);
-                ctx.lineTo(0, this.height / 4);
-                ctx.lineTo(-this.width / 2, this.height / 2);
+                ctx.moveTo(0, -this.height / 2); // 機首
+                ctx.lineTo(this.width / 2, this.height / 2); // 右翼
+                ctx.lineTo(0, this.height / 4); // 後部中央
+                ctx.lineTo(-this.width / 2, this.height / 2); // 左翼
                 ctx.closePath();
                 ctx.fill();
 
+                // キャノピー(窓)
+                ctx.fillStyle = '#f8fafc';
+                ctx.beginPath();
+                ctx.arc(0, -this.height / 8, this.width / 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // エンジンの炎
                 ctx.fillStyle = '#f97316';
                 ctx.beginPath();
-                ctx.moveTo(-10, this.height / 4 + 2);
-                ctx.lineTo(10, this.height / 4 + 2);
-                ctx.lineTo(0, this.height / 2 + 10 + Math.random() * 12); 
+                ctx.moveTo(-this.width / 4, this.height / 4 + 2);
+                ctx.lineTo(0, this.height / 2 + Math.random() * 15);
+                ctx.lineTo(this.width / 4, this.height / 4 + 2);
                 ctx.closePath();
                 ctx.fill();
 
@@ -389,6 +581,65 @@
         // 敵の発生間隔を管理するカウンター
         let frameCount = 0;
 
+        // =========================================
+        // Phase 4: ゲームステート、スコア、UI制御
+        // =========================================
+        let gameState = 'TITLE'; // 'TITLE', 'PLAYING', 'GAMEOVER'
+        let score = 0;
+
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const titleScreen = document.getElementById('titleScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreText = document.getElementById('finalScoreText');
+
+        // ボタンのイベントリスナー
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+
+        function startGame() {
+            // オーディオの初期化とBGMの再生開始
+            initAudio();
+            Sound.startBGM();
+
+            // ゲームの初期化
+            score = 0;
+            scoreDisplay.innerText = `Score: ${score}`;
+            bullets = [];
+            enemies = [];
+            player = new Player(canvas.width / 2, canvas.height - 100);
+            frameCount = 0;
+            
+            // UIの切り替え
+            titleScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            scoreDisplay.style.display = 'block';
+            
+            gameState = 'PLAYING';
+        }
+
+        function gameOver() {
+            gameState = 'GAMEOVER';
+            
+            // BGMを止めてゲームオーバー音を鳴らす
+            Sound.stopBGM();
+            Sound.playGameOver();
+
+            scoreDisplay.style.display = 'none';
+            finalScoreText.innerText = `Final Score: ${score}`;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        // 円形当たり判定ヘルパー関数 (当たりやすさのスケール調整付き)
+        function checkCollision(circle1, circle2, hitBoxScale = 0.8) {
+            const dx = circle1.x - circle2.x;
+            const dy = circle1.y - circle2.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            // width を直径とみなして半径を計算
+            const radius1 = (circle1.width / 2) * hitBoxScale;
+            const radius2 = (circle2.width / 2) * hitBoxScale;
+            return distance < radius1 + radius2;
+        }
+
         window.addEventListener('resize', () => {
             if (player) {
                 player.x = Math.min(Math.max(player.x, player.width/2), canvas.width - player.width/2);
@@ -399,32 +650,67 @@
         // メインゲームループ
         function gameLoop() {
             // ==================
-            // 1. ロジック更新
+            // 1. ロジック更新 (PLAYING状態のみ)
             // ==================
             frameCount++;
 
-            // プレイヤーの更新 (弾の配列を渡して発射させる)
-            player.update(input, canvas.width, canvas.height, bullets);
+            if (gameState === 'PLAYING') {
+                // プレイヤーの更新
+                player.update(input, canvas.width, canvas.height, bullets);
 
-            // 敵のスポーン処理 (約60フレーム(1秒)ごとに1体発生)
-            if (frameCount % 60 === 0) {
-                const enemyWidth = 35;
-                // 画面端には発生しないように安全域を設ける
-                const safeMargin = enemyWidth;
-                const randomX = Math.random() * (canvas.width - safeMargin * 2) + safeMargin;
-                // 画面外の上部（マイナス座標）から出現させる
-                enemies.push(new Enemy(randomX, -enemyWidth));
+                // 敵のスポーン処理 (スコアが上がると発生間隔が少し短くなる)
+                const spawnRate = Math.max(20, 60 - Math.floor(score / 500) * 5);
+                if (frameCount % spawnRate === 0) {
+                    const enemyWidth = 35;
+                    const safeMargin = enemyWidth;
+                    const randomX = Math.random() * (canvas.width - safeMargin * 2) + safeMargin;
+                    enemies.push(new Enemy(randomX, -enemyWidth));
+                }
+
+                // 弾と敵の更新
+                bullets.forEach(bullet => bullet.update());
+                enemies.forEach(enemy => enemy.update(canvas.height));
+
+                // ==================
+                // Phase 4: 当たり判定処理
+                // ==================
+                // 弾 vs 敵
+                bullets.forEach(bullet => {
+                    enemies.forEach(enemy => {
+                        if (!bullet.markedForDeletion && !enemy.markedForDeletion) {
+                            if (checkCollision(bullet, enemy)) {
+                                bullet.markedForDeletion = true; // 弾を消す
+                                
+                                // 敵のHPを減らす処理
+                                enemy.hp -= 1;
+                                if (enemy.hp <= 0) {
+                                    enemy.markedForDeletion = true;  // HPが0なら敵を消す
+                                    score += 100; // 撃破スコア加算
+                                    Sound.playExplosion(); // 爆発音
+                                } else {
+                                    score += 10; // 命中スコア加算
+                                    Sound.playDamage(); // ダメージ音
+                                }
+                                scoreDisplay.innerText = `Score: ${score}`;
+                            }
+                        }
+                    });
+                });
+
+                // 自機 vs 敵
+                enemies.forEach(enemy => {
+                    if (!enemy.markedForDeletion) {
+                        // 自機は判定を小さめ(0.6倍)にして避けやすく（遊びやすく）する
+                        if (checkCollision(player, enemy, 0.6)) {
+                            gameOver();
+                        }
+                    }
+                });
+
+                // ガベージコレクション (画面外・破壊されたオブジェクトを消去)
+                bullets = bullets.filter(bullet => !bullet.markedForDeletion);
+                enemies = enemies.filter(enemy => !enemy.markedForDeletion);
             }
-
-            // 弾と敵の更新
-            bullets.forEach(bullet => bullet.update());
-            enemies.forEach(enemy => enemy.update(canvas.height));
-
-            // ガベージコレクション (画面外に出たオブジェクトを配列から除去)
-            // trueを返すものだけ残す（markedForDeletionがfalseのものだけ残る）
-            bullets = bullets.filter(bullet => !bullet.markedForDeletion);
-            enemies = enemies.filter(enemy => !enemy.markedForDeletion);
-
 
             // ==================
             // 2. 描画処理
@@ -432,10 +718,9 @@
             ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 背景のグリッド線（スクロールさせて前進感を出す）
+            // 背景のグリッド線（ステートに関わらず動かし続ける）
             ctx.strokeStyle = 'rgba(30, 41, 59, 0.6)';
             ctx.lineWidth = 1;
-            // frameCountを使ってY座標をずらし、流れるように見せる
             const offset = frameCount % 50; 
             for(let x = 0; x < canvas.width; x += 50) {
                 ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
@@ -447,7 +732,11 @@
             // 全エンティティの描画
             bullets.forEach(bullet => bullet.draw(ctx));
             enemies.forEach(enemy => enemy.draw(ctx));
-            player.draw(ctx); // プレイヤーを一番上に描画するため最後に呼ぶ
+            
+            // プレイ中、またはゲームオーバー後も自機を表示する
+            if (gameState !== 'TITLE') {
+                player.draw(ctx);
+            }
 
             // ==================
             // 3. 次のフレーム
