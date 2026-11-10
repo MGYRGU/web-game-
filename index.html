@@ -2,751 +2,626 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Shooting Game - Phase 3</title>
-    <style>
-        /* =========================================
-           ベーススタイルとレイアウトの堅牢化
-        ========================================= */
-        * {
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>2D Space Shooter - Step 1 Foundation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* CSS Variables & Base Setup */
+    :root {
+      --bg-color: #0b0d17;
+      --accent-color: #00ffcc;
+      --error-color: #ff3366;
+      --warning-color: #ffaa00;
+    }
 
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #0f172a;
-            color: white;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none;
-        }
+    body {
+      background-color: var(--bg-color);
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      touch-action: manipulation;
+      user-select: none;
+    }
 
-        /* 1. ゲームレイヤー (描画専用) */
-        #gameCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
-            display: block;
-        }
+    /* ゲームCanvasの自動スケーリング設定 (3:4比率保持) */
+    #canvas-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: radial-gradient(circle at center, #151b2e 0%, #080910 100%);
+    }
 
-        /* 2. UIレイヤー (UI・スコア・デバッグ表示専用) */
-        #uiLayer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: none;
-        }
+    #gameCanvas {
+      background-color: #05060b;
+      box-shadow: 0 0 30px rgba(0, 255, 204, 0.15), 0 0 2px rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      max-height: 98vh;
+      max-width: 98vw;
+      aspect-ratio: 3 / 4;
+      display: block;
+    }
 
-        /* =========================================
-           Phase 4: UI画面(タイトル、ゲームオーバー、スコア)のスタイル
-        ========================================= */
-        #scoreDisplay {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            font-size: 24px;
-            font-weight: bold;
-            color: #fff;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-            pointer-events: none;
-            display: none; /* プレイ中のみ表示 */
-        }
+    /* デバッグUI オーバーレイ */
+    #debug-overlay {
+      position: fixed;
+      width: min(340px, 92vw);
+      max-height: 280px;
+      background: rgba(13, 16, 27, 0.92);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      z-index: 99999;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
 
-        .screen-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(15, 23, 42, 0.85);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            pointer-events: auto; /* ボタンクリックを許可 */
-            transition: opacity 0.3s ease;
-        }
+    /* 位置切り替え定義 */
+    #debug-overlay.top-left     { top: 12px; left: 12px; }
+    #debug-overlay.top-right    { top: 12px; right: 12px; }
+    #debug-overlay.bottom-left  { bottom: 12px; left: 12px; }
+    #debug-overlay.bottom-right { bottom: 12px; right: 12px; }
 
-        .screen-overlay h1 {
-            font-size: 48px;
-            color: #38bdf8;
-            margin-bottom: 10px;
-            text-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
-            text-align: center;
-            letter-spacing: 2px;
-        }
+    /* エラー検知時の強調ボーダーとパルス */
+    #debug-overlay.has-error {
+      border-color: var(--error-color);
+      box-shadow: 0 0 20px rgba(255, 51, 102, 0.4), 0 8px 24px rgba(0, 0, 0, 0.8);
+      animation: errorShake 0.35s cubic-bezier(.36,.07,.19,.97) both;
+    }
 
-        .screen-overlay p {
-            font-size: 18px;
-            color: #cbd5e1;
-            margin-bottom: 30px;
-        }
+    @keyframes errorShake {
+      10%, 90% { transform: translate3d(-1px, 0, 0); }
+      20%, 80% { transform: translate3d(2px, 0, 0); }
+      30%, 50%, 70% { transform: translate3d(-3px, 0, 0); }
+      40%, 60% { transform: translate3d(3px, 0, 0); }
+    }
 
-        .btn {
-            padding: 15px 40px;
-            font-size: 20px;
-            font-weight: bold;
-            color: #fff;
-            background: #2563eb;
-            border: 2px solid #60a5fa;
-            border-radius: 30px;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
-            transition: all 0.2s;
-        }
+    #debug-header {
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
 
-        .btn:hover {
-            background: #1d4ed8;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
-        }
+    #debug-header .badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: bold;
+    }
 
-        .hidden {
-            display: none !important;
-        }
+    #debug-header .badge-ok {
+      background: rgba(0, 255, 204, 0.15);
+      color: var(--accent-color);
+    }
 
-        /* =========================================
-           デバッグUIのスタイル
-        ========================================= */
-        #debugUI {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background-color: rgba(15, 23, 42, 0.9);
-            border: 1px solid #ef4444;
-            border-radius: 8px;
-            padding: 12px;
-            width: 90%;
-            max-width: 400px;
-            max-height: 40vh;
-            overflow-y: auto;
-            pointer-events: auto;
-            display: none;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
-        }
+    #debug-header .badge-err {
+      background: rgba(255, 51, 102, 0.25);
+      color: var(--error-color);
+    }
 
-        .debug-header {
-            color: #f87171;
-            font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 8px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #334155;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+    #debug-content {
+      padding: 8px 10px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
 
-        .debug-error-item {
-            color: #fecaca;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 12px;
-            margin-bottom: 8px;
-            word-break: break-all;
-            background: rgba(239, 68, 68, 0.2);
-            padding: 6px;
-            border-radius: 4px;
-        }
-    </style>
+    /* エラーログ項目 */
+    .debug-item {
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 3px solid #64748b;
+      word-break: break-word;
+    }
+
+    .debug-item.error {
+      background: rgba(255, 51, 102, 0.1);
+      border-left-color: var(--error-color);
+      color: #ff99aa;
+    }
+
+    .debug-item.warn {
+      background: rgba(255, 170, 0, 0.1);
+      border-left-color: var(--warning-color);
+      color: #ffcc66;
+    }
+
+    .debug-item.info {
+      background: rgba(0, 255, 204, 0.08);
+      border-left-color: var(--accent-color);
+      color: #a7f3d0;
+    }
+
+    .debug-item .msg {
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: #fff;
+    }
+
+    .debug-item .meta {
+      font-size: 9.5px;
+      color: #94a3b8;
+    }
+
+    .debug-item pre {
+      margin-top: 4px;
+      font-size: 9px;
+      color: #cbd5e1;
+      max-height: 80px;
+      overflow-x: auto;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 4px;
+      border-radius: 3px;
+    }
+
+    /* 最小化表示スタイル */
+    #debug-overlay.minimized {
+      max-height: 34px;
+    }
+    #debug-overlay.minimized #debug-content,
+    #debug-overlay.minimized #debug-footer {
+      display: none;
+    }
+
+    /* 操作ボタン */
+    .dbg-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #cbd5e1;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .dbg-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+    }
+
+    /* デバッグ用テストトリガーバー (画面下部) */
+    #test-control-bar {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(6px);
+      padding: 6px 14px;
+      border-radius: 30px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      z-index: 9998;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+  </style>
 </head>
 <body>
 
-    <!-- 描画用キャンバス -->
-    <canvas id="gameCanvas"></canvas>
+  <!-- ゲームキャンバスコンテナ -->
+  <div id="canvas-container">
+    <canvas id="gameCanvas" width="480" height="640"></canvas>
+  </div>
 
-    <!-- UI用レイヤー -->
-    <div id="uiLayer">
-        <!-- Phase 4: スコアと各画面UIの追加 -->
-        <div id="scoreDisplay">Score: 0</div>
-
-        <!-- タイトル画面 -->
-        <div id="titleScreen" class="screen-overlay">
-            <h1>Neon Shooter</h1>
-            <p>Drag or Arrow Keys to Move (Auto-fire)</p>
-            <button id="startBtn" class="btn">START GAME</button>
-        </div>
-
-        <!-- ゲームオーバー画面 -->
-        <div id="gameOverScreen" class="screen-overlay hidden">
-            <h1 style="color: #ef4444; text-shadow: 0 0 15px rgba(239, 68, 68, 0.6);">GAME OVER</h1>
-            <p id="finalScoreText">Score: 0</p>
-            <button id="restartBtn" class="btn">RESTART</button>
-        </div>
-
-        <!-- デバッグ画面コンテナ -->
-        <div id="debugUI">
-            <div class="debug-header">
-                <span>⚠️ Runtime Error Detected</span>
-            </div>
-            <div id="debugContent"></div>
-        </div>
+  <!-- デバッグUI (初期位置: 左上 top-left) -->
+  <div id="debug-overlay" class="top-left">
+    <div id="debug-header">
+      <div class="flex items-center gap-2">
+        <span id="debug-status-badge" class="badge badge-ok">SYSTEM OK</span>
+        <span class="text-xs text-slate-300 font-bold">DEBUG MONITOR</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="btn-dbg-pos" class="dbg-btn" title="位置を切り替え (左上/右上/右下/左下)">⇄ 位置</button>
+        <button id="btn-dbg-min" class="dbg-btn" title="最小化/展開">_</button>
+        <button id="btn-dbg-clear" class="dbg-btn" title="ログ消去">×</button>
+      </div>
     </div>
+    <div id="debug-content">
+      <div class="debug-item info">
+        <div class="msg">Step 1 初期化完了</div>
+        <div class="meta">エラーリスナー & Canvasループが稼働中です。</div>
+      </div>
+    </div>
+    <div id="debug-footer" class="p-1 px-2.5 bg-white/5 border-t border-white/5 flex justify-between text-[9px] text-slate-400">
+      <span id="dbg-fps-text">FPS: 60</span>
+      <span id="dbg-pos-label">位置: top-left (F2で切替)</span>
+    </div>
+  </div>
 
-    <!-- JavaScript ロジック -->
-    <script>
-        /**
-         * 1. デバッグ＆エラーハンドリング システム
-         */
-        const debugUI = document.getElementById('debugUI');
-        const debugContent = document.getElementById('debugContent');
+  <!-- Step 1 動作検証用：エラー意図発生テストバー -->
+  <div id="test-control-bar">
+    <span class="text-[11px] text-slate-300 font-semibold hidden sm:inline">エラー捕捉テスト:</span>
+    <button id="btn-test-undef" class="dbg-btn !bg-red-500/20 !border-red-400/40 hover:!bg-red-500/40 text-red-200">
+      未定義変数 (ReferenceError)
+    </button>
+    <button id="btn-test-null" class="dbg-btn !bg-orange-500/20 !border-orange-400/40 hover:!bg-orange-500/40 text-orange-200">
+      Null参照 (TypeError)
+    </button>
+    <button id="btn-test-promise" class="dbg-btn !bg-yellow-500/20 !border-yellow-400/40 hover:!bg-yellow-500/40 text-yellow-200">
+      Promise拒否
+    </button>
+  </div>
 
-        function displayError(message, source, lineno, colno) {
-            debugUI.style.display = 'block';
-            const el = document.createElement('div');
-            el.className = 'debug-error-item';
-            let text = `<strong>Error:</strong> ${message}`;
-            if (source) {
-                const filename = source.split('/').pop() || 'inline script';
-                text += `<br><span style="color: #94a3b8; font-size: 10px;">Location: ${filename} at line ${lineno}:${colno}</span>`;
-            }
-            el.innerHTML = text;
-            debugContent.appendChild(el);
-            debugUI.scrollTop = debugUI.scrollHeight;
-        }
+  <script>
+    /**
+     * =========================================================================
+     *  1. DEBUG MONITOR ENGINE
+     *  最優先でロードし、以降の全スクリプトの構文・実行時エラーを捕捉する
+     * =========================================================================
+     */
+    const DebugMonitor = {
+      overlay: null,
+      content: null,
+      badge: null,
+      posLabel: null,
+      errorCount: 0,
+      positions: ['top-left', 'top-right', 'bottom-right', 'bottom-left'],
+      currentPosIdx: 0,
 
-        window.onerror = function(message, source, lineno, colno, error) {
-            displayError(message, source, lineno, colno);
-            return false; 
-        };
+      init() {
+        this.overlay = document.getElementById('debug-overlay');
+        this.content = document.getElementById('debug-content');
+        this.badge = document.getElementById('debug-status-badge');
+        this.posLabel = document.getElementById('dbg-pos-label');
 
-        window.addEventListener('unhandledrejection', function(event) {
-            displayError(`Unhandled Promise: ${event.reason}`, 'Promise', 0, 0);
+        this.bindEvents();
+        this.installGlobalHandlers();
+      },
+
+      bindEvents() {
+        // 位置切り替えボタン
+        document.getElementById('btn-dbg-pos').addEventListener('click', () => this.cyclePosition());
+        
+        // 最小化トグル
+        document.getElementById('btn-dbg-min').addEventListener('click', () => {
+          this.overlay.classList.toggle('minimized');
         });
 
-        /**
-         * 2. キャンバスのセットアップ
-         */
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        // ログ消去ボタン
+        document.getElementById('btn-dbg-clear').addEventListener('click', () => this.clearLogs());
 
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+        // ショートカットキー (F2で位置切替)
+        window.addEventListener('keydown', (e) => {
+          if (e.key === 'F2') {
+            e.preventDefault();
+            this.cyclePosition();
+          }
+        });
+      },
+
+      cyclePosition() {
+        this.overlay.classList.remove(this.positions[this.currentPosIdx]);
+        this.currentPosIdx = (this.currentPosIdx + 1) % this.positions.length;
+        const newPos = this.positions[this.currentPosIdx];
+        this.overlay.classList.add(newPos);
+        if (this.posLabel) {
+          this.posLabel.textContent = `位置: ${newPos} (F2で切替)`;
         }
+      },
 
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+      clearLogs() {
+        this.content.innerHTML = '';
+        this.errorCount = 0;
+        this.overlay.classList.remove('has-error');
+        this.badge.className = 'badge badge-ok';
+        this.badge.textContent = 'SYSTEM OK';
+      },
 
-        /**
-         * 2.5 レトロサウンドシステム (Web Audio API)
-         * 外部ファイルを使わず、オシレーターで波形を生成して音を鳴らします。
-         */
-        let audioCtx;
-        let bgmInterval;
-        
-        function initAudio() {
-            if (!audioCtx) {
-                // ブラウザの互換性を考慮したAudioContextの生成
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            // ユーザーの操作後に再開する
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-        }
+      // エラー発生時のUI描画
+      reportError(title, detail, source = '', lineno = '', colno = '', stack = '') {
+        this.errorCount++;
+        this.overlay.classList.add('has-error');
+        this.badge.className = 'badge badge-err';
+        this.badge.textContent = `${this.errorCount} ERROR${this.errorCount > 1 ? 'S' : ''}`;
 
-        const Sound = {
-            playShoot: () => {
-                if (!audioCtx || audioCtx.state !== 'running') return;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(110, audioCtx.currentTime + 0.1);
-                gain.gain.setValueAtTime(0.02, audioCtx.currentTime); // 音量控えめ
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-                osc.connect(gain); gain.connect(audioCtx.destination);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
-            },
-            playDamage: () => {
-                if (!audioCtx || audioCtx.state !== 'running') return;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
-                gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-                osc.connect(gain); gain.connect(audioCtx.destination);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
-            },
-            playExplosion: () => {
-                if (!audioCtx || audioCtx.state !== 'running') return;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(100, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.3);
-                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-                osc.connect(gain); gain.connect(audioCtx.destination);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
-            },
-            playGameOver: () => {
-                if (!audioCtx || audioCtx.state !== 'running') return;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-                osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 1.0);
-                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 1.0);
-                osc.connect(gain); gain.connect(audioCtx.destination);
-                osc.start(); osc.stop(audioCtx.currentTime + 1.0);
-            },
-            startBGM: () => {
-                Sound.stopBGM();
-                // 8bit風のシンプルなベースラインの周波数配列
-                const notes = [220, 0, 261.63, 293.66, 329.63, 0, 392.00, 329.63];
-                let noteIndex = 0;
-                bgmInterval = setInterval(() => {
-                    if (!audioCtx || audioCtx.state !== 'running') return;
-                    if (notes[noteIndex] > 0) {
-                        const osc = audioCtx.createOscillator();
-                        const gain = audioCtx.createGain();
-                        osc.type = 'triangle';
-                        osc.frequency.value = notes[noteIndex];
-                        gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
-                        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
-                        osc.connect(gain); gain.connect(audioCtx.destination);
-                        osc.start(); osc.stop(audioCtx.currentTime + 0.15);
-                    }
-                    noteIndex = (noteIndex + 1) % notes.length;
-                }, 150); // 150msごとに音を鳴らすループ
-            },
-            stopBGM: () => {
-                if (bgmInterval) clearInterval(bgmInterval);
-            }
+        // 最小化されていたら自動展開
+        this.overlay.classList.remove('minimized');
+
+        const item = document.createElement('div');
+        item.className = 'debug-item error';
+
+        const fileName = source ? source.split('/').pop().split('?')[0] : 'inline';
+        const loc = lineno ? `[${fileName}:${lineno}:${colno}]` : '';
+
+        item.innerHTML = `
+          <div class="msg">${this.escape(title)}</div>
+          <div class="meta text-red-300 font-mono">${this.escape(detail)} ${loc}</div>
+          ${stack ? `<pre>${this.escape(stack)}</pre>` : ''}
+        `;
+
+        this.content.appendChild(item);
+        this.content.scrollTop = this.content.scrollHeight;
+      },
+
+      reportInfo(msg, meta = '') {
+        const item = document.createElement('div');
+        item.className = 'debug-item info';
+        item.innerHTML = `
+          <div class="msg">${this.escape(msg)}</div>
+          ${meta ? `<div class="meta">${this.escape(meta)}</div>` : ''}
+        `;
+        this.content.appendChild(item);
+        this.content.scrollTop = this.content.scrollHeight;
+      },
+
+      escape(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      },
+
+      installGlobalHandlers() {
+        // 1. 通常の実行時エラー (例: "Error: score is not defined")
+        window.onerror = (message, source, lineno, colno, error) => {
+          const errName = error ? error.name : 'Runtime Error';
+          const stack = error && error.stack ? error.stack : '';
+          this.reportError(
+            `Error: ${errName}`,
+            message,
+            source,
+            lineno,
+            colno,
+            stack
+          );
+          return false; // ブラウザ標準のconsoleにも出力継続
         };
 
-        /**
-         * 3. 入力管理クラス
-         */
-        class InputManager {
-            constructor() {
-                this.keys = {};
-                this.touchState = { active: false, x: 0, y: 0, dx: 0, dy: 0, lastX: 0, lastY: 0 };
+        // 2. Promise の未処理例外 (Unhandled Rejection)
+        window.addEventListener('unhandledrejection', (event) => {
+          const reason = event.reason;
+          let msg = 'Unknown rejection';
+          let stack = '';
 
-                window.addEventListener('keydown', (e) => { this.keys[e.code] = true; });
-                window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+          if (reason instanceof Error) {
+            msg = `${reason.name}: ${reason.message}`;
+            stack = reason.stack || '';
+          } else if (typeof reason === 'string') {
+            msg = reason;
+          }
 
-                canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
-                canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
-                canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
-                
-                canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-                canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-                canvas.addEventListener('mouseup', (e) => this.handleMouseEnd(e));
-                canvas.addEventListener('mouseleave', (e) => this.handleMouseEnd(e));
-            }
-
-            handleTouchStart(e) {
-                e.preventDefault(); 
-                this.touchState.active = true;
-                this.touchState.lastX = e.touches[0].clientX;
-                this.touchState.lastY = e.touches[0].clientY;
-                this.touchState.dx = 0; this.touchState.dy = 0;
-            }
-
-            handleTouchMove(e) {
-                e.preventDefault();
-                if (!this.touchState.active) return;
-                this.touchState.dx = e.touches[0].clientX - this.touchState.lastX;
-                this.touchState.dy = e.touches[0].clientY - this.touchState.lastY;
-                this.touchState.lastX = e.touches[0].clientX;
-                this.touchState.lastY = e.touches[0].clientY;
-            }
-
-            handleTouchEnd(e) { this.touchState.active = false; this.touchState.dx = 0; this.touchState.dy = 0; }
-
-            handleMouseDown(e) {
-                this.touchState.active = true;
-                this.touchState.lastX = e.clientX;
-                this.touchState.lastY = e.clientY;
-                this.touchState.dx = 0; this.touchState.dy = 0;
-            }
-
-            handleMouseMove(e) {
-                if (!this.touchState.active) return;
-                this.touchState.dx = e.clientX - this.touchState.lastX;
-                this.touchState.dy = e.clientY - this.touchState.lastY;
-                this.touchState.lastX = e.clientX;
-                this.touchState.lastY = e.clientY;
-            }
-
-            handleMouseEnd(e) { this.touchState.active = false; this.touchState.dx = 0; this.touchState.dy = 0; }
-
-            getMovement() {
-                let dx = 0, dy = 0;
-                if (this.keys['ArrowUp'] || this.keys['KeyW']) dy -= 1;
-                if (this.keys['ArrowDown'] || this.keys['KeyS']) dy += 1;
-                if (this.keys['ArrowLeft'] || this.keys['KeyA']) dx -= 1;
-                if (this.keys['ArrowRight'] || this.keys['KeyD']) dx += 1;
-
-                if (this.touchState.active && (this.touchState.dx !== 0 || this.touchState.dy !== 0)) {
-                    dx = this.touchState.dx; dy = this.touchState.dy;
-                    this.touchState.dx = 0; this.touchState.dy = 0;
-                    return { dx, dy, isTouch: true };
-                }
-
-                if (dx !== 0 && dy !== 0) {
-                    const length = Math.sqrt(dx * dx + dy * dy);
-                    dx /= length; dy /= length;
-                }
-                return { dx, dy, isTouch: false };
-            }
-        }
-
-        /**
-         * =========================================
-         * Phase 3: エンティティ基底クラスと各種オブジェクト
-         * =========================================
-         */
-
-        // 基底クラス: 座標、サイズ、削除フラグなどの共通要素を管理
-        class Entity {
-            constructor(x, y, width, height) {
-                this.x = x;
-                this.y = y;
-                this.width = width;
-                this.height = height;
-                this.markedForDeletion = false; // trueになると次フレームで配列から消去される
-            }
-        }
-
-        // 弾クラス
-        class Bullet extends Entity {
-            constructor(x, y) {
-                super(x, y, 6, 20); // 弾の幅と高さ
-                this.speed = 12;
-                this.color = '#fde047'; // 黄色
-            }
-
-            update() {
-                this.y -= this.speed; // 上に向かって飛ぶ
-                // 画面上部から完全にはみ出したら削除フラグを立てる
-                if (this.y + this.height < 0) {
-                    this.markedForDeletion = true;
-                }
-            }
-
-            draw(ctx) {
-                ctx.fillStyle = this.color;
-                // 中心を基準にして描画
-                ctx.fillRect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
-                
-                // 少し光るエフェクト（見た目の向上）
-                ctx.fillStyle = 'rgba(253, 224, 71, 0.4)';
-                ctx.fillRect(this.x - this.width, this.y - this.height / 2 + 5, this.width * 2, this.height - 10);
-            }
-        }
-
-        // 敵クラス
-        class Enemy extends Entity {
-            constructor(x, y) {
-                super(x, y, 35, 35);
-                // 敵によって落ちる速度をランダムにする
-                this.speed = 1.5 + Math.random() * 2; // 耐久があるため少し遅く調整
-                
-                // 耐久力(HP)を追加
-                this.maxHp = 3;
-                this.hp = this.maxHp;
-            }
-
-            update(canvasHeight) {
-                this.y += this.speed; // 下に向かって落ちる
-                // 画面下部から完全にはみ出したら削除フラグを立てる
-                if (this.y - this.height > canvasHeight) {
-                    this.markedForDeletion = true;
-                }
-            }
-
-            draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                
-                // HPに応じて色を変化させる（ダメージを受けると暗い赤になる）
-                const lightness = 30 + (this.hp / this.maxHp) * 30; // 30% ~ 60%
-                ctx.fillStyle = `hsl(0, 80%, ${lightness}%)`;
-
-                // ひし形のUFO風の敵
-                ctx.beginPath();
-                ctx.moveTo(0, -this.height / 2);
-                ctx.lineTo(this.width / 2, 0);
-                ctx.lineTo(0, this.height / 2);
-                ctx.lineTo(-this.width / 2, 0);
-                ctx.closePath();
-                ctx.fill();
-
-                // 中央のコア
-                ctx.fillStyle = '#1e293b';
-                ctx.beginPath();
-                ctx.arc(0, 0, this.width / 4, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.restore();
-            }
-        }
-
-        // 自機クラス (Phase 3: 発射機能の追加)
-        class Player extends Entity {
-            constructor(x, y) {
-                super(x, y, 40, 40);
-                this.speed = 6;
-                this.color = '#38bdf8';
-                
-                // 射撃用タイマー
-                this.shootInterval = 10; // 10フレームに1回発射（1秒間に約6発）
-                this.shootTimer = 0;
-            }
-
-            // 更新処理に bullets 配列を引数として受け取る
-            update(inputManager, canvasWidth, canvasHeight, bullets) {
-                const move = inputManager.getMovement();
-                
-                if (move.isTouch) {
-                    this.x += move.dx; this.y += move.dy;
-                } else {
-                    this.x += move.dx * this.speed; this.y += move.dy * this.speed;
-                }
-
-                const halfW = this.width / 2;
-                const halfH = this.height / 2;
-                if (this.x < halfW) this.x = halfW;
-                if (this.x > canvasWidth - halfW) this.x = canvasWidth - halfW;
-                if (this.y < halfH) this.y = halfH;
-                if (this.y > canvasHeight - halfH) this.y = canvasHeight - halfH;
-
-                // オート射撃の処理
-                this.shootTimer++;
-                if (this.shootTimer >= this.shootInterval) {
-                    // 機首（機体の上部）から弾を生成
-                    bullets.push(new Bullet(this.x, this.y - halfH));
-                    Sound.playShoot(); // 弾の発射音を鳴らす
-                    this.shootTimer = 0; // タイマーリセット
-                }
-            }
-
-            draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                
-                // 機体の描画
-                ctx.fillStyle = this.color;
-                ctx.beginPath();
-                ctx.moveTo(0, -this.height / 2); // 機首
-                ctx.lineTo(this.width / 2, this.height / 2); // 右翼
-                ctx.lineTo(0, this.height / 4); // 後部中央
-                ctx.lineTo(-this.width / 2, this.height / 2); // 左翼
-                ctx.closePath();
-                ctx.fill();
-
-                // キャノピー(窓)
-                ctx.fillStyle = '#f8fafc';
-                ctx.beginPath();
-                ctx.arc(0, -this.height / 8, this.width / 8, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // エンジンの炎
-                ctx.fillStyle = '#f97316';
-                ctx.beginPath();
-                ctx.moveTo(-this.width / 4, this.height / 4 + 2);
-                ctx.lineTo(0, this.height / 2 + Math.random() * 15);
-                ctx.lineTo(this.width / 4, this.height / 4 + 2);
-                ctx.closePath();
-                ctx.fill();
-
-                ctx.restore();
-            }
-        }
-
-        /**
-         * 4. ゲーム管理（エンティティ配列の導入）
-         */
-        const input = new InputManager();
-        let player = new Player(canvas.width / 2, canvas.height - 100);
-        
-        // オブジェクトを一元管理する配列
-        let bullets = [];
-        let enemies = [];
-        
-        // 敵の発生間隔を管理するカウンター
-        let frameCount = 0;
-
-        // =========================================
-        // Phase 4: ゲームステート、スコア、UI制御
-        // =========================================
-        let gameState = 'TITLE'; // 'TITLE', 'PLAYING', 'GAMEOVER'
-        let score = 0;
-
-        const scoreDisplay = document.getElementById('scoreDisplay');
-        const titleScreen = document.getElementById('titleScreen');
-        const gameOverScreen = document.getElementById('gameOverScreen');
-        const finalScoreText = document.getElementById('finalScoreText');
-
-        // ボタンのイベントリスナー
-        document.getElementById('startBtn').addEventListener('click', startGame);
-        document.getElementById('restartBtn').addEventListener('click', startGame);
-
-        function startGame() {
-            // オーディオの初期化とBGMの再生開始
-            initAudio();
-            Sound.startBGM();
-
-            // ゲームの初期化
-            score = 0;
-            scoreDisplay.innerText = `Score: ${score}`;
-            bullets = [];
-            enemies = [];
-            player = new Player(canvas.width / 2, canvas.height - 100);
-            frameCount = 0;
-            
-            // UIの切り替え
-            titleScreen.classList.add('hidden');
-            gameOverScreen.classList.add('hidden');
-            scoreDisplay.style.display = 'block';
-            
-            gameState = 'PLAYING';
-        }
-
-        function gameOver() {
-            gameState = 'GAMEOVER';
-            
-            // BGMを止めてゲームオーバー音を鳴らす
-            Sound.stopBGM();
-            Sound.playGameOver();
-
-            scoreDisplay.style.display = 'none';
-            finalScoreText.innerText = `Final Score: ${score}`;
-            gameOverScreen.classList.remove('hidden');
-        }
-
-        // 円形当たり判定ヘルパー関数 (当たりやすさのスケール調整付き)
-        function checkCollision(circle1, circle2, hitBoxScale = 0.8) {
-            const dx = circle1.x - circle2.x;
-            const dy = circle1.y - circle2.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            // width を直径とみなして半径を計算
-            const radius1 = (circle1.width / 2) * hitBoxScale;
-            const radius2 = (circle2.width / 2) * hitBoxScale;
-            return distance < radius1 + radius2;
-        }
-
-        window.addEventListener('resize', () => {
-            if (player) {
-                player.x = Math.min(Math.max(player.x, player.width/2), canvas.width - player.width/2);
-                player.y = Math.min(Math.max(player.y, player.height/2), canvas.height - player.height/2);
-            }
+          this.reportError(
+            'Unhandled Promise Rejection',
+            msg,
+            '',
+            '',
+            '',
+            stack
+          );
         });
 
-        // メインゲームループ
-        function gameLoop() {
-            // ==================
-            // 1. ロジック更新 (PLAYING状態のみ)
-            // ==================
-            frameCount++;
+        // 3. console.error をフックしてUIにも反映
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+          originalConsoleError.apply(console, args);
+          const firstArg = args[0];
+          if (firstArg instanceof Error) {
+            this.reportError(firstArg.name, firstArg.message, '', '', '', firstArg.stack);
+          } else {
+            const formatted = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+            this.reportError('Console Error', formatted);
+          }
+        };
+      }
+    };
 
-            if (gameState === 'PLAYING') {
-                // プレイヤーの更新
-                player.update(input, canvas.width, canvas.height, bullets);
+    // デバッグ監視の起動
+    DebugMonitor.init();
 
-                // 敵のスポーン処理 (スコアが上がると発生間隔が少し短くなる)
-                const spawnRate = Math.max(20, 60 - Math.floor(score / 500) * 5);
-                if (frameCount % spawnRate === 0) {
-                    const enemyWidth = 35;
-                    const safeMargin = enemyWidth;
-                    const randomX = Math.random() * (canvas.width - safeMargin * 2) + safeMargin;
-                    enemies.push(new Enemy(randomX, -enemyWidth));
-                }
+    /**
+     * =========================================================================
+     *  2. STEP 1 VERIFICATION TESTS
+     *  デバッグUIが正しく仕様通りエラーを表示するか検証するテストトリガー
+     * =========================================================================
+     */
+    document.getElementById('btn-test-undef').addEventListener('click', () => {
+      // 意図的な未定義変数アクセス: "ReferenceError: nonExistentPlayerScore is not defined"
+      nonExistentPlayerScore += 100;
+    });
 
-                // 弾と敵の更新
-                bullets.forEach(bullet => bullet.update());
-                enemies.forEach(enemy => enemy.update(canvas.height));
+    document.getElementById('btn-test-null').addEventListener('click', () => {
+      // 意図的なNull参照: "TypeError: Cannot read properties of null"
+      const targetEntity = null;
+      targetEntity.takeDamage(50);
+    });
 
-                // ==================
-                // Phase 4: 当たり判定処理
-                // ==================
-                // 弾 vs 敵
-                bullets.forEach(bullet => {
-                    enemies.forEach(enemy => {
-                        if (!bullet.markedForDeletion && !enemy.markedForDeletion) {
-                            if (checkCollision(bullet, enemy)) {
-                                bullet.markedForDeletion = true; // 弾を消す
-                                
-                                // 敵のHPを減らす処理
-                                enemy.hp -= 1;
-                                if (enemy.hp <= 0) {
-                                    enemy.markedForDeletion = true;  // HPが0なら敵を消す
-                                    score += 100; // 撃破スコア加算
-                                    Sound.playExplosion(); // 爆発音
-                                } else {
-                                    score += 10; // 命中スコア加算
-                                    Sound.playDamage(); // ダメージ音
-                                }
-                                scoreDisplay.innerText = `Score: ${score}`;
-                            }
-                        }
-                    });
-                });
+    document.getElementById('btn-test-promise').addEventListener('click', () => {
+      // 意図的なPromise Rejection
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('AssetLoadError: failed to load texture "boss_final.png"'));
+        }, 100);
+      });
+    });
 
-                // 自機 vs 敵
-                enemies.forEach(enemy => {
-                    if (!enemy.markedForDeletion) {
-                        // 自機は判定を小さめ(0.6倍)にして避けやすく（遊びやすく）する
-                        if (checkCollision(player, enemy, 0.6)) {
-                            gameOver();
-                        }
-                    }
-                });
+    /**
+     * =========================================================================
+     *  3. GAME CANVAS FOUNDATION & STARFIELD LOOP
+     *  解像度 480x640 の基準描画ループと星空背景演出
+     * =========================================================================
+     */
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
-                // ガベージコレクション (画面外・破壊されたオブジェクトを消去)
-                bullets = bullets.filter(bullet => !bullet.markedForDeletion);
-                enemies = enemies.filter(enemy => !enemy.markedForDeletion);
-            }
+    // 仮想解像度
+    const VIRTUAL_WIDTH = 480;
+    const VIRTUAL_HEIGHT = 640;
 
-            // ==================
-            // 2. 描画処理
-            // ==================
-            ctx.fillStyle = '#0f172a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // パララックス星空パーティクル
+    const stars = [];
+    const STAR_COUNT = 65;
+    for (let i = 0; i < STAR_COUNT; i++) {
+      stars.push({
+        x: Math.random() * VIRTUAL_WIDTH,
+        y: Math.random() * VIRTUAL_HEIGHT,
+        size: Math.random() < 0.7 ? 1 : (Math.random() < 0.9 ? 1.8 : 2.5),
+        speed: 0.5 + Math.random() * 2.2,
+        alpha: 0.3 + Math.random() * 0.7
+      });
+    }
 
-            // 背景のグリッド線（ステートに関わらず動かし続ける）
-            ctx.strokeStyle = 'rgba(30, 41, 59, 0.6)';
-            ctx.lineWidth = 1;
-            const offset = frameCount % 50; 
-            for(let x = 0; x < canvas.width; x += 50) {
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-            }
-            for(let y = -50; y < canvas.height; y += 50) {
-                ctx.beginPath(); ctx.moveTo(0, y + offset); ctx.lineTo(canvas.width, y + offset); ctx.stroke();
-            }
+    // FPS計測
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fps = 60;
+    const fpsElem = document.getElementById('dbg-fps-text');
 
-            // 全エンティティの描画
-            bullets.forEach(bullet => bullet.draw(ctx));
-            enemies.forEach(enemy => enemy.draw(ctx));
-            
-            // プレイ中、またはゲームオーバー後も自機を表示する
-            if (gameState !== 'TITLE') {
-                player.draw(ctx);
-            }
+    // Step 1 プレビュー自機（待機状態アニメーション用）
+    const placeholderPlayer = {
+      x: VIRTUAL_WIDTH / 2,
+      y: VIRTUAL_HEIGHT - 120,
+      radius: 14,
+      hoverOffset: 0
+    };
 
-            // ==================
-            // 3. 次のフレーム
-            // ==================
-            requestAnimationFrame(gameLoop);
+    /**
+     * 更新処理
+     */
+    function update(dt) {
+      // 星空のスクロール更新
+      for (let s of stars) {
+        s.y += s.speed;
+        if (s.y > VIRTUAL_HEIGHT) {
+          s.y = 0;
+          s.x = Math.random() * VIRTUAL_WIDTH;
         }
+      }
 
-        // ゲーム開始
-        gameLoop();
-    </script>
+      // プレビュー自機の待機浮遊モーション
+      placeholderPlayer.hoverOffset = Math.sin(performance.now() * 0.004) * 5;
+    }
+
+    /**
+     * 描画処理
+     */
+    function draw() {
+      // 1. 背景クリア
+      ctx.fillStyle = '#060814';
+      ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+
+      // 2. 星空描画
+      for (let s of stars) {
+        ctx.fillStyle = `rgba(200, 230, 255, ${s.alpha})`;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 3. グリッドガイドライン (背景のレトロサイバー感)
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.03)';
+      ctx.lineWidth = 1;
+      const gridSize = 40;
+      for (let x = 0; x < VIRTUAL_WIDTH; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, VIRTUAL_HEIGHT);
+        ctx.stroke();
+      }
+
+      // 4. Step 1 ステータスHUD (Canvas内)
+      ctx.fillStyle = 'rgba(0, 255, 204, 0.9)';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('STEP 1: SYSTEM INITIALIZED', VIRTUAL_WIDTH / 2, 70);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.font = '12px monospace';
+      ctx.fillText('Canvas Resolution: 480 × 640 (Auto Scaled)', VIRTUAL_WIDTH / 2, 95);
+      ctx.fillText('GitHub Pages Ready', VIRTUAL_WIDTH / 2, 115);
+
+      // 5. 自機シンボル (幾何学ベクター描画)
+      const px = placeholderPlayer.x;
+      const py = placeholderPlayer.y + placeholderPlayer.hoverOffset;
+
+      ctx.save();
+      ctx.shadowColor = '#00ffcc';
+      ctx.shadowBlur = 12;
+
+      // 機体ボディ
+      ctx.fillStyle = '#00ffcc';
+      ctx.beginPath();
+      ctx.moveTo(px, py - 18);
+      ctx.lineTo(px + 14, py + 14);
+      ctx.lineTo(px, py + 8);
+      ctx.lineTo(px - 14, py + 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // コックピットコア
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // スラスター炎
+      ctx.fillStyle = 'rgba(255, 100, 50, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(px - 5, py + 10);
+      ctx.lineTo(px + 5, py + 10);
+      ctx.lineTo(px, py + 18 + Math.random() * 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // 待機ガイドテキスト
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px monospace';
+      ctx.fillText('Awaiting Step 2: Player Input & Entity Movement', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 60);
+    }
+
+    /**
+     * メインループ (requestAnimationFrame)
+     */
+    function loop(currentTime) {
+      const dt = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+
+      // FPSカウント
+      frameCount++;
+      if (frameCount % 30 === 0) {
+        fps = Math.round(1 / dt);
+        if (fpsElem) fpsElem.textContent = `FPS: ${fps}`;
+      }
+
+      update(dt);
+      draw();
+
+      requestAnimationFrame(loop);
+    }
+
+    // ページロード完了後にループ開始
+    window.addEventListener('load', () => {
+      requestAnimationFrame((time) => {
+        lastTime = time;
+        loop(time);
+      });
+      DebugMonitor.reportInfo('Canvasループ開始', '480x640 内部解像度でレンダリング中');
+    });
+  </script>
 </body>
 </html>
 ```
