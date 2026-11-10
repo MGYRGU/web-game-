@@ -145,12 +145,6 @@
         </div>
     </div>
 
-    <!-- 動作確認用ボタン (次フェーズ以降は削除・非表示にします) -->
-    <div id="testControls">
-        <button id="btnTestError">意図的なエラー発生</button>
-        <button id="btnClearLog">ログをクリア</button>
-    </div>
-
     <!-- =========================================
          JavaScript ロジック
     ========================================= -->
@@ -212,57 +206,236 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             
-            // リサイズされるたびに描画内容が消えるため、再描画を呼ぶ
-            renderPlaceholder();
+            // Phase 2からはgameLoopで常時再描画されるため、ここでの単発の描画呼び出しは削除します
         }
 
         // 初回実行時と、画面リサイズ時に実行
         window.addEventListener('resize', resizeCanvas);
 
-        // Phase 1 用のプレースホルダー描画
-        function renderPlaceholder() {
-            // 背景のクリア
+        // 初期化
+        resizeCanvas();
+
+        /**
+         * =========================================
+         * Phase 2: ゲームループ・入力管理・自機クラスの実装
+         * =========================================
+         */
+
+        // 1. 入力管理クラス (キーボード & タッチ)
+        class InputManager {
+            constructor() {
+                this.keys = {};
+                this.touchState = {
+                    active: false,
+                    x: 0,
+                    y: 0,
+                    dx: 0,
+                    dy: 0,
+                    lastX: 0,
+                    lastY: 0
+                };
+
+                // キーボードイベント
+                window.addEventListener('keydown', (e) => { this.keys[e.code] = true; });
+                window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+
+                // タッチ・マウスイベント（キャンバスへの操作）
+                // passive: false は、e.preventDefault() を呼び出してスクロールを無効化するために必要
+                canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+                canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+                canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
+                
+                canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                canvas.addEventListener('mouseup', (e) => this.handleMouseEnd(e));
+                canvas.addEventListener('mouseleave', (e) => this.handleMouseEnd(e));
+            }
+
+            handleTouchStart(e) {
+                e.preventDefault(); 
+                this.touchState.active = true;
+                const touch = e.touches[0];
+                this.touchState.lastX = touch.clientX;
+                this.touchState.lastY = touch.clientY;
+                this.touchState.dx = 0;
+                this.touchState.dy = 0;
+            }
+
+            handleTouchMove(e) {
+                e.preventDefault();
+                if (!this.touchState.active) return;
+                const touch = e.touches[0];
+                this.touchState.dx = touch.clientX - this.touchState.lastX;
+                this.touchState.dy = touch.clientY - this.touchState.lastY;
+                this.touchState.lastX = touch.clientX;
+                this.touchState.lastY = touch.clientY;
+            }
+
+            handleTouchEnd(e) {
+                this.touchState.active = false;
+                this.touchState.dx = 0;
+                this.touchState.dy = 0;
+            }
+
+            handleMouseDown(e) {
+                this.touchState.active = true;
+                this.touchState.lastX = e.clientX;
+                this.touchState.lastY = e.clientY;
+                this.touchState.dx = 0;
+                this.touchState.dy = 0;
+            }
+
+            handleMouseMove(e) {
+                if (!this.touchState.active) return;
+                this.touchState.dx = e.clientX - this.touchState.lastX;
+                this.touchState.dy = e.clientY - this.touchState.lastY;
+                this.touchState.lastX = e.clientX;
+                this.touchState.lastY = e.clientY;
+            }
+
+            handleMouseEnd(e) {
+                this.touchState.active = false;
+                this.touchState.dx = 0;
+                this.touchState.dy = 0;
+            }
+
+            // 移動ベクトルを取得（キーボードは -1.0 ~ 1.0、タッチは相対ピクセル）
+            getMovement() {
+                let dx = 0;
+                let dy = 0;
+
+                // キーボード入力の判定 (WASD or 矢印キー)
+                if (this.keys['ArrowUp'] || this.keys['KeyW']) dy -= 1;
+                if (this.keys['ArrowDown'] || this.keys['KeyS']) dy += 1;
+                if (this.keys['ArrowLeft'] || this.keys['KeyA']) dx -= 1;
+                if (this.keys['ArrowRight'] || this.keys['KeyD']) dx += 1;
+
+                // タッチ・マウスでのドラッグがあれば上書き（相対移動をそのまま適用）
+                if (this.touchState.active && (this.touchState.dx !== 0 || this.touchState.dy !== 0)) {
+                    dx = this.touchState.dx;
+                    dy = this.touchState.dy;
+                    // 一度取得したら消費したとみなし、0にリセットする
+                    this.touchState.dx = 0;
+                    this.touchState.dy = 0;
+                    return { dx, dy, isTouch: true };
+                }
+
+                // キーボードの斜め移動時の速度正規化（ルート2で割ることで、斜めでも同じ速度にする）
+                if (dx !== 0 && dy !== 0) {
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    dx /= length;
+                    dy /= length;
+                }
+
+                return { dx, dy, isTouch: false };
+            }
+        }
+
+        // 2. 自機 (Player) クラス
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 40;
+                this.speed = 6;
+                this.color = '#38bdf8'; // Tailwind風のライトブルー
+            }
+
+            update(inputManager, canvasWidth, canvasHeight) {
+                const move = inputManager.getMovement();
+                
+                if (move.isTouch) {
+                    // タッチ・マウス操作の場合はスワイプ量に追従
+                    this.x += move.dx;
+                    this.y += move.dy;
+                } else {
+                    // キーボード操作の場合は一定速度で移動
+                    this.x += move.dx * this.speed;
+                    this.y += move.dy * this.speed;
+                }
+
+                // 画面外にはみ出さないように座標を制限（境界判定）
+                const halfW = this.width / 2;
+                const halfH = this.height / 2;
+
+                if (this.x < halfW) this.x = halfW;
+                if (this.x > canvasWidth - halfW) this.x = canvasWidth - halfW;
+                if (this.y < halfH) this.y = halfH;
+                if (this.y > canvasHeight - halfH) this.y = canvasHeight - halfH;
+            }
+
+            draw(ctx) {
+                // シンプルな戦闘機の形で描画（上向きの三角形）
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // 機体
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(0, -this.height / 2); // 機首
+                ctx.lineTo(this.width / 2, this.height / 2); // 右翼
+                ctx.lineTo(0, this.height / 4); // 後部凹み
+                ctx.lineTo(-this.width / 2, this.height / 2); // 左翼
+                ctx.closePath();
+                ctx.fill();
+
+                // エンジン噴射の炎（常にゆらゆらさせる）
+                ctx.fillStyle = '#f97316'; // オレンジ
+                ctx.beginPath();
+                ctx.moveTo(-10, this.height / 4 + 2);
+                ctx.lineTo(10, this.height / 4 + 2);
+                // 炎の長さをランダムにすることで推進しているように見せる
+                ctx.lineTo(0, this.height / 2 + 10 + Math.random() * 12); 
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        // 3. ゲーム管理（初期化とループ）
+        const input = new InputManager();
+        // 初期位置は画面下部の中央
+        let player = new Player(canvas.width / 2, canvas.height - 100);
+
+        // リサイズ時に自機が画面外にいたら戻すための処理
+        window.addEventListener('resize', () => {
+            if (player) {
+                player.x = Math.min(Math.max(player.x, player.width/2), canvas.width - player.width/2);
+                player.y = Math.min(Math.max(player.y, player.height/2), canvas.height - player.height/2);
+            }
+        });
+
+        // メインゲームループ
+        let animationId;
+        function gameLoop() {
+            // 1. 更新処理
+            player.update(input, canvas.width, canvas.height);
+
+            // 2. 描画処理 (背景クリア)
             ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // グリッド線（デバッグや位置把握用）を描画
-            ctx.strokeStyle = '#1e293b';
+
+            // 背景のグリッド線を描画（宇宙空間の移動感や距離感をつかみやすくするため）
+            ctx.strokeStyle = 'rgba(30, 41, 59, 0.6)';
             ctx.lineWidth = 1;
             for(let x = 0; x < canvas.width; x += 50) {
                 ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
             }
-            for(let y = 0; x = 0, y < canvas.height; y += 50) {
+            for(let y = 0; y < canvas.height; y += 50) {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
             }
 
-            // テキストの描画
-            ctx.fillStyle = '#64748b';
-            ctx.font = '20px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('Game Canvas Ready.', canvas.width / 2, canvas.height / 2);
-            ctx.font = '14px sans-serif';
-            ctx.fillText('z-index: 1 / The UI layer is on top of this.', canvas.width / 2, canvas.height / 2 + 30);
+            // 自機の描画
+            player.draw(ctx);
+
+            // 3. 次のフレームを要求
+            animationId = requestAnimationFrame(gameLoop);
         }
 
-        // 初期化
-        resizeCanvas();
-
-
-        /**
-         * 3. テスト用コントロールの処理
-         */
-        document.getElementById('btnTestError').addEventListener('click', () => {
-            // 意図的に存在しない関数を呼び出してエラーを発生させる
-            someUndefinedFunctionThatCausesAnError();
-        });
-
-        document.getElementById('btnClearLog').addEventListener('click', () => {
-            // ログの初期化と非表示
-            debugContent.innerHTML = '';
-            debugUI.style.display = 'none';
-        });
-
+        // ゲーム開始
+        gameLoop();
     </script>
 </body>
 </html>
